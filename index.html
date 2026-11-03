@@ -372,7 +372,7 @@ main{max-width:1320px; margin:0 auto; padding:28px clamp(16px,4vw,48px) 80px;}
 .date-filter-hint{font-size:11px;color:var(--ink-400);flex-basis:100%; margin-left:2px;}
 .status-filter-select{width:auto; min-width:165px;}
 .delivery-filter-controls{display:flex; align-items:flex-start; flex-wrap:wrap; gap:8px; width:100%;}
-.delivery-status-control{display:flex; align-items:center; gap:8px; padding:0; margin-left:4px;}
+.delivery-status-control{display:flex; align-items:center; gap:8px; padding:0; margin-left:22px;}
 .delivery-status-chips{display:flex; flex-wrap:wrap; align-items:center; gap:8px; width:100%; padding-top:8px;}
 #deliveryFilters{display:block;}
 @media(max-width:900px){.delivery-status-control{padding:0;}}
@@ -3096,7 +3096,7 @@ function renderRiskFilters(){
     if(l!=="All" && count===0) return;
     const btn = el('button','chip'+(riskFilter===l?' active':''), `${l} <span style="opacity:.6">(${count})</span>`);
     btn.addEventListener('click', ()=>{ riskFilter=l; renderRiskFilters(); renderRiskTable(); });
-    chipsBar.appendChild(btn);
+    bar.appendChild(btn);
   });
 }
 function renderRiskTable(){
@@ -3276,7 +3276,7 @@ function renderActionFilters(){
     if(s!=="All" && count===0) return;
     const btn = el('button','chip'+(actionFilter===s?' active':''), `${s} <span style="opacity:.6">(${count})</span>`);
     btn.addEventListener('click', ()=>{ actionFilter=s; renderActionFilters(); renderActionTable(); });
-    chipsBar.appendChild(btn);
+    bar.appendChild(btn);
   });
 }
 function renderActionTable(){
@@ -3512,7 +3512,7 @@ function renderIssueFilters(){
     if(s!=="All" && count===0) return;
     const btn = el('button','chip'+(issueFilter===s?' active':''), `${s} <span style="opacity:.6">(${count})</span>`);
     btn.addEventListener('click', ()=>{ issueFilter=s; renderIssueFilters(); renderIssueTable(); });
-    chipsBar.appendChild(btn);
+    bar.appendChild(btn);
   });
 }
 function renderIssueTable(){
@@ -3619,7 +3619,7 @@ function renderDependencyFilters(){
     if(s!=="All" && count===0) return;
     const btn = el('button','chip'+(dependencyFilter===s?' active':''), `${s} <span style="opacity:.6">(${count})</span>`);
     btn.addEventListener('click', ()=>{ dependencyFilter=s; renderDependencyFilters(); renderDependencyTable(); });
-    chipsBar.appendChild(btn);
+    bar.appendChild(btn);
   });
 }
 function renderDependencyTable(){
