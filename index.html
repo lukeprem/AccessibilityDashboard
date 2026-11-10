@@ -548,6 +548,15 @@ footer code{background:var(--slate-100); padding:1px 6px; border-radius:4px; fon
 /* Scrollbar polish */
 ::-webkit-scrollbar{height:8px; width:8px;}
 ::-webkit-scrollbar-thumb{background:var(--slate-300); border-radius:8px;}
+.wk-filters{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:16px;}
+.wk-filter-group{display:flex;align-items:center;gap:8px;}
+.wk-input{font-family:var(--font-body);font-size:13px;color:var(--ink-900);border:1px solid var(--slate-300);background:var(--white);border-radius:8px;padding:6px 10px;}
+.wk-year{width:96px;}
+.wk-legend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;}
+.wk-chip{appearance:none;cursor:pointer;font-family:var(--font-body);font-size:12.5px;font-weight:600;border:1px solid var(--slate-300);background:var(--white);color:var(--ink-400);padding:5px 12px;border-radius:999px;display:inline-flex;align-items:center;gap:7px;}
+.wk-chip .wk-dot{width:10px;height:10px;border-radius:50%;background:var(--c);opacity:.35;}
+.wk-chip.on{color:var(--ink-900);border-color:var(--c);}
+.wk-chip.on .wk-dot{opacity:1;}
 </style>
 </head>
 <body>
@@ -585,6 +594,7 @@ footer code{background:var(--slate-100); padding:1px 6px; border-radius:4px; fon
     <button class="tab-btn" data-view="raid" role="tab" aria-selected="false">RAID Log <span class="tab-count" id="countRisk"></span></button>
     <button class="tab-btn" data-view="actions" role="tab" aria-selected="false">Action Tracker <span class="tab-count" id="countAction"></span></button>
     <button class="tab-btn" data-view="executive" role="tab" aria-selected="false">Executive View</button>
+    <button class="tab-btn" data-view="weeklykpi" role="tab" aria-selected="false">Weekly KPI Data</button>
   </div>
 </nav>
 
@@ -997,6 +1007,38 @@ footer code{background:var(--slate-100); padding:1px 6px; border-radius:4px; fon
     </div>
     <div class="milestone-strip" id="milestoneStrip"></div>
   </section>
+
+  <!-- ========================= WEEKLY KPI DATA ========================= -->
+  <section id="weeklykpi" class="view">
+    <div class="section-head"><div><h2>Weekly KPI Data</h2><div class="sub">Weekly KPI % by area. The latest week's Overall Journal 3B2 KPI feeds the current KPI % on the Executive View.</div></div></div>
+    <div class="toolbar">
+      <button class="btn btn-primary edit-gated" id="weeklyEditBtn">&#9998; Edit data</button>
+      <button class="btn edit-gated" id="weeklyAddBtn" style="display:none;">+ Add row</button>
+      <span class="toolbar-divider"></span>
+      <label class="btn edit-gated" for="weeklyImportInput">&#8593; Import CSV</label>
+      <input type="file" id="weeklyImportInput" accept=".csv" hidden>
+      <button class="btn" id="weeklyExportBtn">&#8595; Export CSV</button>
+      <button class="btn btn-ghost edit-gated" id="weeklyResetBtn">&#8635; Reset</button>
+      <span class="toolbar-hint">Changes save automatically in this browser.</span>
+    </div>
+    <div class="wk-filters">
+      <div class="wk-filter-group"><span class="filter-label">From</span><select id="wkFromWeek" class="wk-input"></select><input id="wkFromYear" class="wk-input wk-year" type="number" placeholder="Year" min="2000" max="2100"></div>
+      <div class="wk-filter-group"><span class="filter-label">To</span><select id="wkToWeek" class="wk-input"></select><input id="wkToYear" class="wk-input wk-year" type="number" placeholder="Year" min="2000" max="2100"></div>
+      <button class="btn btn-ghost" id="wkClearBtn">Clear filters</button>
+      <span class="toolbar-hint" id="wkFilterHint"></span>
+    </div>
+    <div class="chart-card" style="margin-bottom:18px;">
+      <h3>KPI trend</h3>
+      <div class="sub">Follows the weeks shown in the table below. Click a name to show or hide its line.</div>
+      <div id="wkLegend" class="wk-legend"></div>
+      <div id="wkChart"></div>
+    </div>
+    <div class="table-card"><div class="table-scroll"><table>
+      <thead><tr><th>Year</th><th>Week</th><th>Cell Press</th><th>Clinics</th><th>HMS</th><th>S&amp;T</th><th>CPC</th><th>Overall Journal 3B2 KPI</th><th class="actions-col"></th></tr></thead>
+      <tbody id="weeklyBody"></tbody>
+    </table></div></div>
+  </section>
+
 
   <!-- suggestion lists for editable status-type fields -->
   <datalist id="statusOptions">
@@ -1854,6 +1896,7 @@ const DEFAULT_KPI_METRIC_DATA = [
     "target": 95
   }
 ];
+const DEFAULT_WEEKLY_KPI_DATA = [];
 
 // ---- 6. LOAD WORKING COPIES -------------------------------------------
 // The dashboard reads/writes these arrays. On first load they're a copy
@@ -1876,6 +1919,7 @@ const STORAGE_KEYS = {
   issue: "a11y_dashboard_issue_v1",
   dependency: "a11y_dashboard_dependency_v1",
   kpiMetric: "a11y_dashboard_kpimetric_v1",
+  weeklyKpi: "a11y_dashboard_weeklykpi_v1",
 };
 function loadWorkingCopy(key, defaults){
   try{
@@ -1917,6 +1961,7 @@ let assumptionData = loadWorkingCopy('assumption', DEFAULT_ASSUMPTION_DATA);
 let issueData = loadWorkingCopy('issue', DEFAULT_ISSUE_DATA);
 let dependencyData = loadWorkingCopy('dependency', DEFAULT_DEPENDENCY_DATA);
 let kpiMetricData = loadWorkingCopy('kpiMetric', DEFAULT_KPI_METRIC_DATA);
+let weeklyKpiData = loadWorkingCopy('weeklyKpi', DEFAULT_WEEKLY_KPI_DATA);
 
 // ---- 7. CLOUD SYNC (Google Sheet backend) ---------------------------------
 // A Google Apps Script "Web App" URL (see the setup instructions you were
@@ -2004,13 +2049,14 @@ function applySheetData(json){
   issueData = json.issue || [];
   dependencyData = json.dependency || [];
   kpiMetricData = json.kpiMetric || [];
+  if(Array.isArray(json.weeklyKpi)) weeklyKpiData = json.weeklyKpi;
   cacheLocally('delivery', deliveryData);
   cacheLocally('risk', riskData);
   cacheLocally('action', actionData);
   cacheLocally('assumption', assumptionData);
   cacheLocally('issue', issueData);
   cacheLocally('dependency', dependencyData);
-  cacheLocally('kpiMetric', kpiMetricData);
+  cacheLocally('kpiMetric', kpiMetricData); cacheLocally('weeklyKpi', weeklyKpiData);
   if(json._meta) setSheetMeta(json._meta.syncedBy, json._meta.syncedAt);
   if(json._access) applyLockState(!!json._access.hasEditPasscode);
 }
@@ -2167,7 +2213,7 @@ async function syncToSheet(){
   const bundle = {
     delivery: deliveryData, risk: riskData, action: actionData,
     assumption: assumptionData, issue: issueData, dependency: dependencyData,
-    kpiMetric: kpiMetricData,
+    kpiMetric: kpiMetricData, weeklyKpi: weeklyKpiData,
   };
   try{
     // text/plain avoids a CORS preflight that Apps Script web apps don't
@@ -4265,6 +4311,148 @@ function initTabs(){
    Every step runs independently (try/catch) so a problem in one
    widget never blocks the rest of the dashboard, including tabs.
    ================================================================ */
+/* ================================================================
+   WEEKLY KPI DATA tab: filters, editable table, trend chart, and a
+   feed of the latest Overall KPI into the Executive View banner.
+   ================================================================ */
+const WK_SERIES = [
+  {k:'cellPress', n:'Cell Press', c:'#4285F4'}, {k:'clinics', n:'Clinics', c:'#EA4335'},
+  {k:'hms', n:'HMS', c:'#F29900'}, {k:'snt', n:'S&T', c:'#34A853'},
+  {k:'cpc', n:'CPC', c:'#7C6FC4'}, {k:'overall', n:'Overall Journal 3B2 KPI', c:'#182333'},
+];
+let wkSeriesOn = {cellPress:true, clinics:true, hms:true, snt:true, cpc:false, overall:false};
+let editModeWeekly = false;
+const wkFilter = {fromWeek:"", fromYear:"", toWeek:"", toYear:""};
+const wkKey = r => (Number(r.year)||0)*100 + (Number(r.week)||0);
+const wkNum = v => { if(v===null||v===undefined||String(v).trim()==="") return null; const n = parseFloat(String(v).replace(/[%,\s]/g,"")); return isNaN(n) ? null : n; };
+const wkFmt = v => (v===null||v===undefined||v==="") ? "\u2014" : Number(v).toFixed(2)+"%";
+function isoWeekOf(d){
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const day = t.getUTCDay()||7;
+  t.setUTCDate(t.getUTCDate()+4-day); const y0 = new Date(Date.UTC(t.getUTCFullYear(),0,1));
+  return {year:t.getUTCFullYear(), week:Math.ceil((((t-y0)/86400000)+1)/7)};
+}
+function wkFiltered(){
+  const fa = (wkFilter.fromWeek && wkFilter.fromYear) ? Number(wkFilter.fromYear)*100+Number(wkFilter.fromWeek) : null;
+  const ta = (wkFilter.toWeek && wkFilter.toYear) ? Number(wkFilter.toYear)*100+Number(wkFilter.toWeek) : null;
+  return weeklyKpiData.map((r,i)=>({r,i})).filter(x=>{ const k = wkKey(x.r); return (fa===null||k>=fa) && (ta===null||k<=ta); }).sort((a,b)=>wkKey(a.r)-wkKey(b.r));
+}
+// The latest week's Overall Journal KPI becomes the "current" % of the first Executive View KPI.
+function syncKpiFromWeekly(){
+  let best = null, bk = -1;
+  weeklyKpiData.forEach(r=>{ if(wkNum(r.overall)===null) return; const k = wkKey(r); if(k>=bk){ bk = k; best = r; } });
+  if(!best || !kpiMetricData.length) return;
+  const v = Math.round(Number(best.overall)*100)/100;
+  if(Number(kpiMetricData[0].current) !== v){
+    kpiMetricData[0].current = v;
+    if(!editLocked || editUnlocked) saveWorkingCopy('kpiMetric', kpiMetricData); else cacheLocally('kpiMetric', kpiMetricData);
+  }
+}
+function renderWeeklyKpiTable(){
+  const body = document.getElementById('weeklyBody'); if(!body) return;
+  const rows = wkFiltered(); body.innerHTML = "";
+  const hint = document.getElementById('wkFilterHint');
+  if(hint){
+    const half = (!!wkFilter.fromWeek !== !!wkFilter.fromYear) || (!!wkFilter.toWeek !== !!wkFilter.toYear);
+    hint.textContent = half ? "Pick both a week and a year for a filter to apply." : (weeklyKpiData.length ? `Showing ${rows.length} of ${weeklyKpiData.length} weeks` : "");
+  }
+  if(!rows.length){
+    body.innerHTML = `<tr><td colspan="9"><div class="empty-note">${weeklyKpiData.length ? "No weeks match these filters." : 'No weekly KPI data yet. Use "+ Add row" or "Import CSV" above.'}</div></td></tr>`;
+    return;
+  }
+  const F = ['cellPress','clinics','hms','snt','cpc'];
+  rows.forEach(({r,i})=>{
+    const tr = document.createElement('tr');
+    if(editModeWeekly){
+      const num = (f,step)=>`<td><input type="number" step="${step}" class="cell-input cell-input-sm" data-i="${i}" data-f="${f}" value="${r[f] ?? ''}"></td>`;
+      tr.innerHTML = num('year',1)+num('week',1)+F.concat('overall').map(f=>num(f,'0.01')).join('')+`<td class="actions-col"><button class="row-delete" data-i="${i}" title="Delete row">&#10005;</button></td>`;
+    } else {
+      tr.innerHTML = `<td>${r.year ?? '\u2014'}</td><td class="strong">Week ${r.week ?? '\u2014'}</td>`+F.map(f=>`<td>${wkFmt(r[f])}</td>`).join('')+`<td class="strong">${wkFmt(r.overall)}</td><td class="actions-col"></td>`;
+    }
+    body.appendChild(tr);
+  });
+}
+function renderWeeklyKpiChart(){
+  const host = document.getElementById('wkChart'); if(!host) return;
+  const leg = document.getElementById('wkLegend');
+  if(leg) leg.innerHTML = WK_SERIES.map(s=>`<button class="wk-chip${wkSeriesOn[s.k]?' on':''}" data-wk="${s.k}" style="--c:${s.c}"><span class="wk-dot"></span>${escHtml(s.n)}</button>`).join("");
+  const rows = wkFiltered().map(x=>x.r), vis = WK_SERIES.filter(s=>wkSeriesOn[s.k]), vals = [];
+  rows.forEach(r=>vis.forEach(s=>{ const v = wkNum(r[s.k]); if(v!==null) vals.push(v); }));
+  if(!rows.length || !vals.length){ host.innerHTML = `<div class="empty-note">No data to chart for the selected weeks.</div>`; return; }
+  const W=900, H=360, L=64, R=28, T=28, B=48, pw=W-L-R, ph=H-T-B;
+  let lo = Math.max(0, Math.floor((Math.min(...vals)-5)/10)*10), hi = Math.min(100, Math.ceil((Math.max(...vals)+1)/10)*10);
+  if(hi<=lo) hi = lo+10;
+  const step = (hi-lo)>60 ? 20 : 10, n = rows.length, pad = n>1 ? 36 : 0;
+  const X = i => n===1 ? L+pw/2 : L+pad+i*((pw-2*pad)/(n-1)), Y = v => T+ph-((v-lo)/(hi-lo))*ph;
+  const multiYear = new Set(rows.map(r=>r.year)).size>1, every = Math.ceil(n/12);
+  let g = "";
+  for(let t=lo; t<=hi; t+=step) g += `<line x1="${L}" x2="${W-R}" y1="${Y(t)}" y2="${Y(t)}" stroke="#E3E8EF"/><text x="${L-10}" y="${Y(t)+4}" text-anchor="end" font-size="12" fill="#5B6B82">${t}.00%</text>`;
+  rows.forEach((r,i)=>{ if(i%every===0 || i===n-1) g += `<text x="${X(i)}" y="${H-B+24}" text-anchor="middle" font-size="12" fill="#182333">${multiYear ? `W${r.week}/${String(r.year).slice(-2)}` : `Week ${r.week}`}</text>`; });
+  vis.forEach(s=>{
+    let d = "", pen = false;
+    rows.forEach((r,i)=>{ const v = wkNum(r[s.k]); if(v===null){ pen = false; return; } d += (pen?"L":"M")+X(i).toFixed(1)+" "+Y(v).toFixed(1)+" "; pen = true; });
+    g += `<path d="${d}" fill="none" stroke="${s.c}" stroke-width="2.5"/>`;
+    rows.forEach((r,i)=>{ const v = wkNum(r[s.k]); if(v===null) return;
+      g += `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="3.5" fill="${s.c}"/>`;
+      if(n<=12) g += `<text x="${X(i).toFixed(1)}" y="${(Y(v)-9).toFixed(1)}" text-anchor="middle" font-size="11" fill="${s.c}">${v.toFixed(2)}%</text>`; });
+  });
+  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" font-family="Inter, sans-serif" role="img" aria-label="Weekly KPI trend">${g}</svg>`;
+}
+const WK_COLUMN_MAP = {"year":"year","week":"week","cell press":"cellPress","clinics":"clinics","hms":"hms","s&t":"snt","cpc":"cpc","overall journal 3b2 kpi":"overall","overall journal kpi":"overall","overall":"overall"};
+function wireWeeklyKpi(){
+  const opts = '<option value="">Week</option>' + Array.from({length:53},(_,k)=>`<option value="${k+1}">${k+1}</option>`).join("");
+  ['wkFromWeek','wkToWeek'].forEach(id=>{ document.getElementById(id).innerHTML = opts; });
+  const map = {wkFromWeek:'fromWeek', wkFromYear:'fromYear', wkToWeek:'toWeek', wkToYear:'toYear'};
+  const redraw = ()=>{ renderWeeklyKpiTable(); renderWeeklyKpiChart(); };
+  Object.keys(map).forEach(id=>document.getElementById(id).addEventListener('change', e=>{ wkFilter[map[id]] = e.target.value; redraw(); }));
+  document.getElementById('wkClearBtn').addEventListener('click', ()=>{ Object.keys(map).forEach(id=>{ document.getElementById(id).value = ""; wkFilter[map[id]] = ""; }); redraw(); });
+  document.getElementById('wkLegend').addEventListener('click', e=>{ const b = e.target.closest('[data-wk]'); if(!b) return; wkSeriesOn[b.dataset.wk] = !wkSeriesOn[b.dataset.wk]; renderWeeklyKpiChart(); });
+  const editBtn = document.getElementById('weeklyEditBtn'), addBtn = document.getElementById('weeklyAddBtn'), body = document.getElementById('weeklyBody');
+  editBtn.addEventListener('click', ()=>{
+    editModeWeekly = !editModeWeekly;
+    editBtn.textContent = editModeWeekly ? "\u2713 Done editing" : "\u270E Edit data";
+    editBtn.classList.toggle('is-editing', editModeWeekly);
+    addBtn.style.display = editModeWeekly ? "" : "none";
+    renderWeeklyKpiTable();
+  });
+  addBtn.addEventListener('click', ()=>{
+    const last = weeklyKpiData.reduce((b,r)=>(!b || wkKey(r)>wkKey(b)) ? r : b, null); let y, w;
+    if(last){ y = Number(last.year)||TODAY.getFullYear(); w = (Number(last.week)||0)+1; if(w>53){ w = 1; y++; } }
+    else { const c = isoWeekOf(TODAY); y = c.year; w = c.week; }
+    weeklyKpiData.push({year:y, week:w, cellPress:null, clinics:null, hms:null, snt:null, cpc:null, overall:null});
+    saveWorkingCopy('weeklyKpi', weeklyKpiData); renderAll();
+  });
+  body.addEventListener('change', e=>{
+    const t = e.target; if(!t.matches('.cell-input')) return;
+    const i = +t.dataset.i, f = t.dataset.f, n = wkNum(t.value);
+    weeklyKpiData[i][f] = (f==='year'||f==='week') ? (n===null ? null : Math.round(n)) : n;
+    saveWorkingCopy('weeklyKpi', weeklyKpiData); refreshLiveWidgets();
+  });
+  body.addEventListener('click', e=>{
+    const b = e.target.closest('.row-delete'); if(!b) return;
+    if(confirm('Delete this week?')){ weeklyKpiData.splice(+b.dataset.i, 1); saveWorkingCopy('weeklyKpi', weeklyKpiData); renderAll(); }
+  });
+  document.getElementById('weeklyExportBtn').addEventListener('click', ()=>{
+    const rows = weeklyKpiData.slice().sort((a,b)=>wkKey(a)-wkKey(b)).map(r=>[r.year,r.week,r.cellPress,r.clinics,r.hms,r.snt,r.cpc,r.overall]);
+    downloadCSV('weekly-kpi-data.csv', ["Year","Week","Cell Press","Clinics","HMS","S&T","CPC","Overall Journal 3B2 KPI"], rows);
+  });
+  document.getElementById('weeklyImportInput').addEventListener('change', async e=>{
+    const file = e.target.files[0]; if(!file) return;
+    try{
+      const rows = parseCSV(await readFileAsText(file));
+      const imported = mapCsvRows(rows, WK_COLUMN_MAP, ()=>({year:"",week:"",cellPress:"",clinics:"",hms:"",snt:"",cpc:"",overall:""}))
+        .map(r=>({year: Math.round(wkNum(r.year) ?? TODAY.getFullYear()), week: parseInt(String(r.week).replace(/\D/g,""),10),
+          cellPress:wkNum(r.cellPress), clinics:wkNum(r.clinics), hms:wkNum(r.hms), snt:wkNum(r.snt), cpc:wkNum(r.cpc), overall:wkNum(r.overall)}))
+        .filter(r=>r.week>=1 && r.week<=53);
+      if(!imported.length){ alert('No rows were recognized. The CSV needs a "Week" column (and ideally "Year").'); return; }
+      if(confirm(`Import ${imported.length} week(s) and replace the current Weekly KPI data?`)){ weeklyKpiData = imported; saveWorkingCopy('weeklyKpi', weeklyKpiData); renderAll(); }
+    }catch(err){ console.error(err); alert('Could not read that CSV file.'); }
+    e.target.value = "";
+  });
+  document.getElementById('weeklyResetBtn').addEventListener('click', ()=>{
+    if(confirm('Clear all Weekly KPI data?')){ weeklyKpiData = JSON.parse(JSON.stringify(DEFAULT_WEEKLY_KPI_DATA)); saveWorkingCopy('weeklyKpi', weeklyKpiData); renderAll(); }
+  });
+}
+
 function refreshLiveWidgets(){
   document.getElementById('countDelivery').textContent = deliveryData.length;
   document.getElementById('countRisk').textContent = riskData.filter(r=>r.status==="Open").length + " open";
@@ -4276,7 +4464,7 @@ function refreshLiveWidgets(){
   [renderKPIs, renderPulse, renderCharts, renderTopRisks, renderHeatGrid, renderAttentionDigest,
    renderDeliveryFilters, renderRiskFilters, renderActionFilters,
    renderIssueFilters, renderDependencyFilters,
-   renderKpiBanners, renderTrackGrid, renderMilestoneStrip, renderActionStats].forEach(fn=>{
+   syncKpiFromWeekly, renderKpiBanners, renderWeeklyKpiChart, renderTrackGrid, renderMilestoneStrip, renderActionStats].forEach(fn=>{
     try{ fn(); } catch(err){ console.error('Dashboard refresh step failed:', fn.name, err); }
   });
 }
@@ -4284,7 +4472,7 @@ function renderAll(){
   refreshLiveWidgets();
   [renderDeliveryTable, renderRiskTable, renderActionTable,
    renderAssumptionTable, renderIssueTable, renderDependencyTable,
-   renderKpiMetricTable].forEach(fn=>{
+   renderKpiMetricTable, renderWeeklyKpiTable].forEach(fn=>{
     try{ fn(); } catch(err){ console.error('Dashboard render step failed:', fn.name, err); }
   });
 }
@@ -4314,6 +4502,7 @@ const DEFAULT_ISSUE_DATA = ${safeJSONForScript(issueData)};
 const DEFAULT_DEPENDENCY_DATA = ${safeJSONForScript(dependencyData)};
 
 const DEFAULT_KPI_METRIC_DATA = ${safeJSONForScript(kpiMetricData)};
+const DEFAULT_WEEKLY_KPI_DATA = ${safeJSONForScript(weeklyKpiData)};
 
 const STORAGE_KEYS = {
   delivery: "a11y_dashboard_delivery_v1_${ts}",
@@ -4323,6 +4512,7 @@ const STORAGE_KEYS = {
   issue: "a11y_dashboard_issue_v1_${ts}",
   dependency: "a11y_dashboard_dependency_v1_${ts}",
   kpiMetric: "a11y_dashboard_kpimetric_v1_${ts}",
+  weeklyKpi: "a11y_dashboard_weeklykpi_v1_${ts}",
 };
 function loadWorkingCopy(key, defaults){
   try{
@@ -4353,6 +4543,7 @@ let assumptionData = loadWorkingCopy('assumption', DEFAULT_ASSUMPTION_DATA);
 let issueData = loadWorkingCopy('issue', DEFAULT_ISSUE_DATA);
 let dependencyData = loadWorkingCopy('dependency', DEFAULT_DEPENDENCY_DATA);
 let kpiMetricData = loadWorkingCopy('kpiMetric', DEFAULT_KPI_METRIC_DATA);
+let weeklyKpiData = loadWorkingCopy('weeklyKpi', DEFAULT_WEEKLY_KPI_DATA);
 
 // Cloud sync (Google Sheet backend) — included so this downloaded file is a
 // fully working standalone dashboard on its own; it starts disconnected
@@ -4420,9 +4611,10 @@ function applySheetData(json){
   deliveryData = migrateDeliveryRows(json.delivery || []); riskData = (json.risk || []).map(function(r){ return Object.assign({raisedDate:"", closedDate:""}, r || {}); }); actionData = json.action || [];
   assumptionData = json.assumption || []; issueData = json.issue || []; dependencyData = json.dependency || [];
   kpiMetricData = json.kpiMetric || [];
+  if(Array.isArray(json.weeklyKpi)) weeklyKpiData = json.weeklyKpi;
   cacheLocally('delivery', deliveryData); cacheLocally('risk', riskData); cacheLocally('action', actionData);
   cacheLocally('assumption', assumptionData); cacheLocally('issue', issueData); cacheLocally('dependency', dependencyData);
-  cacheLocally('kpiMetric', kpiMetricData);
+  cacheLocally('kpiMetric', kpiMetricData); cacheLocally('weeklyKpi', weeklyKpiData);
   if(json._meta) setSheetMeta(json._meta.syncedBy, json._meta.syncedAt);
   if(json._access) applyLockState(!!json._access.hasEditPasscode);
 }
@@ -4537,7 +4729,7 @@ function scheduleSheetSync(){
 async function syncToSheet(){
   if(!sheetUrl) return;
   setSheetStatus("syncing");
-  const bundle = { delivery:deliveryData, risk:riskData, action:actionData, assumption:assumptionData, issue:issueData, dependency:dependencyData, kpiMetric:kpiMetricData };
+  const bundle = { delivery:deliveryData, risk:riskData, action:actionData, assumption:assumptionData, issue:issueData, dependency:dependencyData, kpiMetric: kpiMetricData, weeklyKpi: weeklyKpiData };
   try{
     const res = await fetch(sheetUrl, { method:"POST", headers:{"Content-Type":"text/plain;charset=utf-8"}, body: JSON.stringify({action:"save", data:bundle, syncedBy:userName || "Unknown", passcode:editPasscode}) });
     const json = await res.json();
@@ -4684,13 +4876,14 @@ function resetAllToFileDefaults(){
   issueData = JSON.parse(JSON.stringify(DEFAULT_ISSUE_DATA));
   dependencyData = JSON.parse(JSON.stringify(DEFAULT_DEPENDENCY_DATA));
   kpiMetricData = JSON.parse(JSON.stringify(DEFAULT_KPI_METRIC_DATA));
+  weeklyKpiData = JSON.parse(JSON.stringify(DEFAULT_WEEKLY_KPI_DATA));
   cacheLocally('delivery', deliveryData);
   cacheLocally('risk', riskData);
   cacheLocally('action', actionData);
   cacheLocally('assumption', assumptionData);
   cacheLocally('issue', issueData);
   cacheLocally('dependency', dependencyData);
-  cacheLocally('kpiMetric', kpiMetricData);
+  cacheLocally('kpiMetric', kpiMetricData); cacheLocally('weeklyKpi', weeklyKpiData);
   renderAll();
   alert("Done \u2014 every tab now reflects the data built into this file.");
 }
@@ -4730,6 +4923,7 @@ function init(){
   try{ wireIssueToolbar(); }catch(err){ console.error('wireIssueToolbar failed', err); }
   try{ wireDependencyToolbar(); }catch(err){ console.error('wireDependencyToolbar failed', err); }
   try{ wireKpiMetricToolbar(); }catch(err){ console.error('wireKpiMetricToolbar failed', err); }
+  try{ wireWeeklyKpi(); }catch(err){ console.error('wireWeeklyKpi failed', err); }
   try{ wireExecutiveControls(); }catch(err){ console.error('wireExecutiveControls failed', err); }
   try{ wireAttentionDigest(); }catch(err){ console.error('wireAttentionDigest failed', err); }
   try{ wireSheetSync(); }catch(err){ console.error('wireSheetSync failed', err); }
