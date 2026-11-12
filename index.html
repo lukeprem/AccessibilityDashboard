@@ -369,6 +369,11 @@ main{max-width:1320px; margin:0 auto; padding:28px clamp(16px,4vw,48px) 80px;}
 .date-picker-native{position:absolute;opacity:0;width:1px;height:1px;overflow:hidden;pointer-events:none;padding:0;border:0;}
 .date-picker-button{width:34px;height:33px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--slate-300);border-radius:7px;background:var(--slate-50);color:var(--ink-600);cursor:pointer;font-size:17px;line-height:1;padding:0;flex-shrink:0;}
 .date-picker-button:hover{border-color:var(--blue-600);color:var(--blue-600);}
+.risk-date-filter{display:flex;align-items:center;gap:10px;margin:0 0 14px;flex-wrap:wrap;}
+.risk-charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:18px;margin:0 0 18px;}
+.risk-charts .chart-card{margin-bottom:0;}
+.rc-legend{display:flex;gap:14px;font-size:12px;color:var(--ink-600);margin-top:6px;flex-wrap:wrap;}
+.rc-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;}
 .date-filter-hint{font-size:11px;color:var(--ink-400);flex-basis:100%; margin-left:2px;}
 .status-filter-select{width:auto; min-width:165px;}
 .delivery-filter-controls{display:flex; align-items:flex-start; flex-wrap:wrap; gap:8px; width:100%;}
@@ -756,6 +761,22 @@ footer code{background:var(--slate-100); padding:1px 6px; border-radius:4px; fon
       <div class="filter-bar" id="riskFilters">
         <span class="filter-label">Filter</span>
       </div>
+      <div class="risk-date-filter">
+        <div class="date-filter-group">
+          <label for="riskFromText">Risk raised from</label>
+          <input class="date-filter-text" id="riskFromText" type="text" placeholder="DD-MM-YYYY" inputmode="numeric" autocomplete="off" aria-label="Risk raised from date">
+          <span class="date-picker-wrap"><button class="date-picker-button" type="button" data-picker="riskFromPicker" aria-label="Choose risk raised from date" title="Choose from date">&#9638;</button><input class="date-picker-native" id="riskFromPicker" type="date" tabindex="-1" aria-hidden="true"></span>
+          <label for="riskToText">To</label>
+          <input class="date-filter-text" id="riskToText" type="text" placeholder="DD-MM-YYYY" inputmode="numeric" autocomplete="off" aria-label="Risk raised to date">
+          <span class="date-picker-wrap"><button class="date-picker-button" type="button" data-picker="riskToPicker" aria-label="Choose risk raised to date" title="Choose to date">&#9638;</button><input class="date-picker-native" id="riskToPicker" type="date" tabindex="-1" aria-hidden="true"></span>
+          <button class="btn btn-sm" type="button" id="riskDateClear">Clear dates</button>
+          <div class="date-filter-hint">Raised date range &middot; type DD-MM-YYYY (or YYYY-MM-DD), or use the calendar.</div>
+        </div>
+      </div>
+      <div class="risk-charts">
+        <div class="chart-card"><h3>Risks raised vs closed</h3><div class="sub" id="riskTrendSub"></div><div id="riskTrendChart"></div></div>
+        <div class="chart-card"><h3>Risk aging (open risks)</h3><div class="sub" id="riskAgingSub"></div><div id="riskAgingChart"></div></div>
+      </div>
       <div class="table-card">
         <div class="table-scroll">
           <table>
@@ -1027,7 +1048,7 @@ footer code{background:var(--slate-100); padding:1px 6px; border-radius:4px; fon
       <button class="btn btn-ghost" id="wkClearBtn">Clear filters</button>
       <span class="toolbar-hint" id="wkFilterHint"></span>
     </div>
-    <div class="chart-card" style="margin-bottom:18px;">
+    <div class="chart-card" style="margin-bottom:18px;max-width:760px;">
       <h3>KPI trend</h3>
       <div class="sub">Follows the weeks shown in the table below. Click a name to show or hide its line.</div>
       <div id="wkLegend" class="wk-legend"></div>
@@ -2786,7 +2807,8 @@ function readFileAsText(file){
 let deliveryFilter = "All";
 const dateFilterState = {
   overview: { from: "", to: "" },
-  delivery: { from: "", to: "" }
+  delivery: { from: "", to: "" },
+  risk: { from: "", to: "" }
 };
 function normalizeFilterDate(value){
   const raw = String(value || "").trim();
@@ -2823,7 +2845,7 @@ function getOverviewDeliveryData(){
   return deliveryData.filter(d=>dateRangeMatches(d, "overview"));
 }
 function bindDateFilter(scope){
-  const prefix = scope === "overview" ? "overview" : "delivery";
+  const prefix = scope === "overview" ? "overview" : (scope === "risk" ? "risk" : "delivery");
   ["from","to"].forEach(edge=>{
     const cap = edge[0].toUpperCase()+edge.slice(1);
     const textInput = document.getElementById(`${prefix}${cap}Text`);
@@ -2857,6 +2879,8 @@ function renderDateFilterResults(scope){
     [renderKPIs, renderPulse, renderCharts, renderAttentionDigest].forEach(fn=>{
       try{ fn(); }catch(err){ console.error('Overview date filter refresh failed:', fn.name, err); }
     });
+  } else if(scope === "risk"){
+    renderRiskTable(); renderRiskCharts();
   } else {
     renderDeliveryFilters();
     renderDeliveryTable();
@@ -3141,7 +3165,7 @@ function renderRiskFilters(){
     const count = l==="All" ? riskData.length : riskData.filter(r=>r.riskLevel===l).length;
     if(l!=="All" && count===0) return;
     const btn = el('button','chip'+(riskFilter===l?' active':''), `${l} <span style="opacity:.6">(${count})</span>`);
-    btn.addEventListener('click', ()=>{ riskFilter=l; renderRiskFilters(); renderRiskTable(); });
+    btn.addEventListener('click', ()=>{ riskFilter=l; renderRiskFilters(); renderRiskTable(); renderRiskCharts(); });
     bar.appendChild(btn);
   });
 }
@@ -3153,7 +3177,10 @@ function renderRiskTable(){
   // order already puts them first — no extra sort needed here.
   // (Overview's "Risks needing attention" ranks by severity separately.)
   const indexed = riskData.map((r,i)=>({r,i}))
-    .filter(x=> riskFilter==="All" || x.r.riskLevel===riskFilter);
+    .filter(x=> (riskFilter==="All" || x.r.riskLevel===riskFilter) && riskRaisedMatches(x.r))
+    // Newest first: blank raised date (just-added rows) on top, then raised date descending.
+    .sort((a,b)=>{ const da = normalizeFilterDate(a.r.raisedDate)||"", db = normalizeFilterDate(b.r.raisedDate)||"";
+      if(!da && db) return -1; if(da && !db) return 1; return da<db ? 1 : da>db ? -1 : a.i-b.i; });
 
   indexed.forEach(({r,i})=>{
     const tr = document.createElement('tr');
@@ -4349,7 +4376,7 @@ function syncKpiFromWeekly(){
 }
 function renderWeeklyKpiTable(){
   const body = document.getElementById('weeklyBody'); if(!body) return;
-  const rows = wkFiltered(); body.innerHTML = "";
+  const rows = wkFiltered().reverse(); body.innerHTML = "";  // latest week first
   const hint = document.getElementById('wkFilterHint');
   if(hint){
     const half = (!!wkFilter.fromWeek !== !!wkFilter.fromYear) || (!!wkFilter.toWeek !== !!wkFilter.toYear);
@@ -4453,6 +4480,91 @@ function wireWeeklyKpi(){
   });
 }
 
+
+/* ---------- Risk raised/closed trend + aging ---------- */
+function riskRaisedMatches(r){
+  const f = dateFilterState.risk.from, t = dateFilterState.risk.to;
+  if(!f && !t) return true;
+  if(f==="__invalid__" || t==="__invalid__") return true;
+  const d = normalizeFilterDate(r.raisedDate);
+  if(!d) return false;
+  return (!f || d>=f) && (!t || d<=t);
+}
+function rcParse(v){ const n = normalizeFilterDate(v); if(!n) return null; const d = new Date(n+"T00:00:00Z"); return isNaN(d) ? null : d; }
+function isRiskClosed(r){ return /closed/i.test(String(r.status||"")) || !!rcParse(r.closedDate); }
+function rcMonday(d){ const t = new Date(d); const k = (t.getUTCDay()+6)%7; t.setUTCDate(t.getUTCDate()-k); return t; }
+function rcFmt(d, monthly){ const m = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getUTCMonth()]; return monthly ? m+" "+String(d.getUTCFullYear()).slice(2) : d.getUTCDate()+" "+m; }
+function rcEmpty(msg){ return `<div class="empty-note">${msg}</div>`; }
+function rcLineChart(labels, series){
+  const W=560,H=230,L=34,R=12,T=14,B=34, n=labels.length;
+  const max = Math.max(1, ...series.flatMap(s=>s.vals)); const step = max<=5?1:Math.ceil(max/5);
+  const top = Math.ceil(max/step)*step;
+  const x = i => L + (n===1 ? (W-L-R)/2 : i*(W-L-R)/(n-1)), y = v => T + (H-T-B)*(1-v/top);
+  let g=""; for(let v=0; v<=top; v+=step){ g += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="#DFE5EC"/><text x="${L-6}" y="${y(v)+4}" text-anchor="end" font-size="10" fill="#7C8AA0">${v}</text>`; }
+  const every = Math.ceil(n/8);
+  labels.forEach((lb,i)=>{ if(i%every===0) g += `<text x="${x(i)}" y="${H-12}" text-anchor="middle" font-size="10" fill="#7C8AA0">${escHtml(lb)}</text>`; });
+  series.forEach(se=>{
+    g += `<polyline fill="none" stroke="${se.color}" stroke-width="2.4" points="${se.vals.map((v,i)=>x(i)+","+y(v)).join(" ")}"/>`;
+    se.vals.forEach((v,i)=>{ g += `<circle cx="${x(i)}" cy="${y(v)}" r="3.4" fill="${se.color}"><title>${escHtml(labels[i])} · ${se.name}: ${v}</title></circle>`; });
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Risks raised versus closed">${g}</svg>`+
+    `<div class="rc-legend">${series.map(se=>`<span><i style="background:${se.color}"></i>${se.name} (${se.vals.reduce((a,b)=>a+b,0)})</span>`).join("")}</div>`;
+}
+function rcBarChart(labels, vals, colors){
+  const W=560,H=230,L=34,R=12,T=18,B=34, n=labels.length;
+  const max = Math.max(1, ...vals); const step = max<=5?1:Math.ceil(max/5); const top = Math.ceil(max/step)*step;
+  const bw = (W-L-R)/n, y = v => T + (H-T-B)*(1-v/top);
+  let g=""; for(let v=0; v<=top; v+=step){ g += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="#DFE5EC"/><text x="${L-6}" y="${y(v)+4}" text-anchor="end" font-size="10" fill="#7C8AA0">${v}</text>`; }
+  labels.forEach((lb,i)=>{
+    const bx = L+i*bw+bw*0.18, w = bw*0.64, by = y(vals[i]);
+    g += `<rect x="${bx}" y="${by}" width="${w}" height="${Math.max(0,H-B-by)}" rx="3" fill="${colors[i]}"><title>${lb}: ${vals[i]} open</title></rect>`;
+    g += `<text x="${bx+w/2}" y="${by-5}" text-anchor="middle" font-size="11" font-weight="700" fill="#182333">${vals[i]}</text>`;
+    g += `<text x="${bx+w/2}" y="${H-12}" text-anchor="middle" font-size="10" fill="#7C8AA0">${lb}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Open risk aging">${g}</svg>`;
+}
+function renderRiskCharts(){
+  const tEl = document.getElementById('riskTrendChart'), aEl = document.getElementById('riskAgingChart'); if(!tEl || !aEl) return;
+  const lvl = riskData.filter(r=> riskFilter==="All" || r.riskLevel===riskFilter);
+  const f = dateFilterState.risk.from, t = dateFilterState.risk.to;
+  const lo = (f && f!=="__invalid__") ? rcParse(f) : null, hi = (t && t!=="__invalid__") ? rcParse(t) : null;
+  const inR = d => d && (!lo || d>=lo) && (!hi || d<=hi);
+  const raised = lvl.map(r=>rcParse(r.raisedDate)).filter(inR);
+  const closed = lvl.filter(isRiskClosed).map(r=>rcParse(r.closedDate)).filter(inR);
+  const sub = document.getElementById('riskTrendSub');
+  const all = raised.concat(closed);
+  if(!all.length){ tEl.innerHTML = rcEmpty("No raised/closed dates in this period. Fill in Raised Date and Closed Date in the table below."); sub.textContent = ""; }
+  else {
+    const minD = lo || new Date(Math.min(...all)), maxD = hi || new Date(Math.max(...all));
+    const monthly = (maxD-minD)/86400000 > 120;
+    const keyOf = d => monthly ? d.getUTCFullYear()*100+d.getUTCMonth() : rcMonday(d).getTime();
+    const buckets = [];
+    if(monthly){ let c = new Date(Date.UTC(minD.getUTCFullYear(), minD.getUTCMonth(), 1)); while(c<=maxD){ buckets.push(new Date(c)); c = new Date(Date.UTC(c.getUTCFullYear(), c.getUTCMonth()+1, 1)); } }
+    else { let c = rcMonday(minD); while(c<=maxD){ buckets.push(new Date(c)); c = new Date(c.getTime()+7*86400000); } }
+    const idx = new Map(buckets.map((b,i)=>[keyOf(b),i]));
+    const rv = buckets.map(()=>0), cv = buckets.map(()=>0);
+    raised.forEach(d=>{ const i = idx.get(keyOf(d)); if(i!==undefined) rv[i]++; });
+    closed.forEach(d=>{ const i = idx.get(keyOf(d)); if(i!==undefined) cv[i]++; });
+    sub.textContent = `${monthly?"Monthly":"Weekly"} · ${(lo||minD).toISOString().slice(0,10)} to ${(hi||maxD).toISOString().slice(0,10)}` + (riskFilter!=="All" ? ` · ${riskFilter} risks` : "");
+    tEl.innerHTML = rcLineChart(buckets.map(b=>rcFmt(b,monthly)), [{name:"Raised", color:"#D1554A", vals:rv},{name:"Closed", color:"#189E86", vals:cv}]);
+  }
+  // Aging of open risks (days since raised, as of today)
+  const today = new Date(Date.UTC(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate()));
+  const open = lvl.filter(r=>!isRiskClosed(r)).map(r=>({r, d:rcParse(r.raisedDate)}));
+  const dated = open.filter(x=>x.d && riskRaisedMatches(x.r));
+  const ages = dated.map(x=>Math.max(0, Math.round((today-x.d)/86400000)));
+  const asub = document.getElementById('riskAgingSub');
+  if(!ages.length){ aEl.innerHTML = rcEmpty("No open risks with a Raised Date in this period."); asub.textContent = ""; }
+  else {
+    const edges = [[0,7,"0-7d"],[8,14,"8-14d"],[15,30,"15-30d"],[31,60,"31-60d"],[61,1e9,"60d+"]];
+    const vals = edges.map(([a,b])=>ages.filter(x=>x>=a&&x<=b).length);
+    const cols = ["#189E86","#7CBF8E","#D99A2B","#E07A4A","#D1554A"];
+    const durs = lvl.filter(isRiskClosed).map(r=>{ const a=rcParse(r.raisedDate), c=rcParse(r.closedDate); return (a&&c&&riskRaisedMatches(r)) ? Math.round((c-a)/86400000) : null; }).filter(x=>x!==null);
+    const avg = a => Math.round(a.reduce((x,y)=>x+y,0)/a.length);
+    asub.textContent = `${ages.length} open · avg age ${avg(ages)}d · oldest ${Math.max(...ages)}d` + (durs.length ? ` · avg time to close ${avg(durs)}d` : "");
+    aEl.innerHTML = rcBarChart(edges.map(e=>e[2]), vals, cols);
+  }
+}
 function refreshLiveWidgets(){
   document.getElementById('countDelivery').textContent = deliveryData.length;
   document.getElementById('countRisk').textContent = riskData.filter(r=>r.status==="Open").length + " open";
@@ -4463,7 +4575,7 @@ function refreshLiveWidgets(){
   document.getElementById('countDependency').textContent = dependencyData.filter(x=>!isRaidResolved(x.status)).length + " open";
   [renderKPIs, renderPulse, renderCharts, renderTopRisks, renderHeatGrid, renderAttentionDigest,
    renderDeliveryFilters, renderRiskFilters, renderActionFilters,
-   renderIssueFilters, renderDependencyFilters,
+   renderIssueFilters, renderDependencyFilters, renderRiskCharts,
    syncKpiFromWeekly, renderKpiBanners, renderWeeklyKpiChart, renderTrackGrid, renderMilestoneStrip, renderActionStats].forEach(fn=>{
     try{ fn(); } catch(err){ console.error('Dashboard refresh step failed:', fn.name, err); }
   });
@@ -4910,6 +5022,7 @@ function init(){
   });
   bindDateFilter("overview");
   bindDateFilter("delivery");
+  bindDateFilter("risk");
   document.getElementById('deliveryStatusSelect').addEventListener('change', ()=>renderDeliveryTable());
   const now = TODAY.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
   document.getElementById('footerUpdated').textContent = "Dashboard generated " + now;
