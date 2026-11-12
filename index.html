@@ -2072,7 +2072,7 @@ function migrateDeliveryRows(rows){
 }
 function applySheetData(json){
   deliveryData = migrateDeliveryRows(json.delivery || []);
-  riskData = (json.risk || []).map(r=>Object.assign({raisedDate:"", closedDate:""}, r || {})); ensureRiskSlNo();
+  riskData = (json.risk || []).map(r=>Object.assign({raisedDate:"", closedDate:""}, r || {}));
   actionData = json.action || [];
   assumptionData = json.assumption || [];
   issueData = json.issue || [];
