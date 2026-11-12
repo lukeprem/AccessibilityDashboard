@@ -369,6 +369,13 @@ main{max-width:1320px; margin:0 auto; padding:28px clamp(16px,4vw,48px) 80px;}
 .date-picker-native{position:absolute;opacity:0;width:1px;height:1px;overflow:hidden;pointer-events:none;padding:0;border:0;}
 .date-picker-button{width:34px;height:33px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--slate-300);border-radius:7px;background:var(--slate-50);color:var(--ink-600);cursor:pointer;font-size:17px;line-height:1;padding:0;flex-shrink:0;}
 .date-picker-button:hover{border-color:var(--blue-600);color:var(--blue-600);}
+th.sortable{cursor:pointer;user-select:none;white-space:nowrap;}
+th.sortable:hover{color:var(--blue-600);}
+th.sortable::after{content:"\21C5";opacity:.35;margin-left:5px;font-size:11px;}
+th.sortable[data-dir="asc"]::after{content:"\25B2";opacity:1;color:var(--blue-600);}
+th.sortable[data-dir="desc"]::after{content:"\25BC";opacity:1;color:var(--blue-600);}
+.rc-scroll{overflow-x:auto;}
+.rc-aging-note{font-size:12px;color:var(--ink-600);margin-top:6px;}
 .risk-date-filter{display:flex;align-items:center;gap:10px;margin:0 0 14px;flex-wrap:wrap;}
 .risk-charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:18px;margin:0 0 18px;}
 .risk-charts .chart-card{margin-bottom:0;}
@@ -774,14 +781,15 @@ footer code{background:var(--slate-100); padding:1px 6px; border-radius:4px; fon
         </div>
       </div>
       <div class="risk-charts">
-        <div class="chart-card"><h3>Risks raised vs closed</h3><div class="sub" id="riskTrendSub"></div><div id="riskTrendChart"></div></div>
-        <div class="chart-card"><h3>Risk aging (open risks)</h3><div class="sub" id="riskAgingSub"></div><div id="riskAgingChart"></div></div>
+        <div class="chart-card"><h3>Risks raised vs closed (weekly)</h3><div class="sub" id="riskTrendSub"></div><div id="riskTrendChart"></div></div>
+        <div class="chart-card"><h3>Risk aging &mdash; days open</h3><div class="sub" id="riskAgingSub"></div><div id="riskAgingChart"></div></div>
       </div>
       <div class="table-card">
         <div class="table-scroll">
           <table>
             <thead>
               <tr>
+                <th>Sl.no.</th>
                 <th>Initiative</th>
                 <th>Risk description</th>
                 <th>Raised Date</th>
@@ -2064,7 +2072,7 @@ function migrateDeliveryRows(rows){
 }
 function applySheetData(json){
   deliveryData = migrateDeliveryRows(json.delivery || []);
-  riskData = (json.risk || []).map(r=>Object.assign({raisedDate:"", closedDate:""}, r || {}));
+  riskData = (json.risk || []).map(r=>Object.assign({raisedDate:"", closedDate:""}, r || {})); ensureRiskSlNo();
   actionData = json.action || [];
   assumptionData = json.assumption || [];
   issueData = json.issue || [];
@@ -2932,7 +2940,7 @@ function renderDeliveryTable(){
       return 0;
     });
 
-  indexed.forEach(({d,i})=>{
+  applyUserSort('delivery', indexed, o=>o.d).forEach(({d,i})=>{
     const tr = document.createElement('tr');
     if(editMode.delivery){
       tr.innerHTML = `
@@ -3172,20 +3180,22 @@ function renderRiskFilters(){
 function renderRiskTable(){
   const body = document.getElementById('riskBody');
   body.innerHTML="";
+  ensureRiskSlNo();
   // Risks have no date field, so "latest first" = most recently added.
   // New rows are inserted at the top of riskData, so plain insertion
   // order already puts them first — no extra sort needed here.
   // (Overview's "Risks needing attention" ranks by severity separately.)
   const indexed = riskData.map((r,i)=>({r,i}))
     .filter(x=> (riskFilter==="All" || x.r.riskLevel===riskFilter) && riskRaisedMatches(x.r))
-    // Newest first: blank raised date (just-added rows) on top, then raised date descending.
-    .sort((a,b)=>{ const da = normalizeFilterDate(a.r.raisedDate)||"", db = normalizeFilterDate(b.r.raisedDate)||"";
-      if(!da && db) return -1; if(da && !db) return 1; return da<db ? 1 : da>db ? -1 : a.i-b.i; });
+    // Default order: Sl.no. descending (newest risk first). Editing dates never moves a row.
+    .sort((a,b)=> (b.r.slno||0)-(a.r.slno||0));
+  const indexedSorted = applyUserSort('risk', indexed, o=>o.r);
 
-  indexed.forEach(({r,i})=>{
+  indexedSorted.forEach(({r,i})=>{
     const tr = document.createElement('tr');
     if(editMode.risk){
       tr.innerHTML = `
+        <td class="nowrap strong">${r.slno ?? ''}</td>
         <td><input class="cell-input" data-i="${i}" data-f="initiative" value="${escAttr(r.initiative)}" placeholder="Initiative name"></td>
         <td class="edit-cell"><textarea class="cell-textarea" data-i="${i}" data-f="risk" placeholder="Risk description">${escHtml(r.risk)}</textarea></td>
         <td>${dateEditorMarkup(r.raisedDate, i, "raisedDate")}</td>
@@ -3201,6 +3211,7 @@ function renderRiskTable(){
       `;
     } else {
       tr.innerHTML = `
+        <td class="nowrap strong">${r.slno ?? ''}</td>
         <td class="strong">${escHtml(r.initiative)}</td>
         <td style="max-width:280px;">${escHtml(r.risk)}</td>
         <td class="nowrap">${fmtDate(r.raisedDate)}</td>
@@ -3220,8 +3231,9 @@ function renderRiskTable(){
 }
 
 // ---- Risk toolbar: edit toggle / add / delete / import / export / reset ----
-const RISK_CSV_HEADER = ["Initiative","Risk","Raised Date","Closed Date","Impact (1-3)","Probability (1-3)","Score","Risk Level","Mitigation / Action Taken","Owner","Risk Action","Status"];
+const RISK_CSV_HEADER = ["Sl.no.","Initiative","Risk","Raised Date","Closed Date","Impact (1-3)","Probability (1-3)","Score","Risk Level","Mitigation / Action Taken","Owner","Risk Action","Status"];
 const RISK_COLUMN_MAP = {
+  "sl.no.":"slno", "sl.no":"slno", "slno":"slno", "sl no":"slno",
   "initiative":"initiative", "risk":"risk", "risk description":"risk",
   "raised date":"raisedDate", "closed date":"closedDate",
   "impact (1-3)":"impact", "impact":"impact",
@@ -3241,7 +3253,7 @@ function wireRiskToolbar(){
     renderRiskTable();
   });
   addBtn.addEventListener('click', ()=>{
-    riskData.unshift({ initiative:"", risk:"", raisedDate:"", closedDate:"", impact:1, probability:1, riskLevel:"Low", mitigation:"", owner:"", action:"Mitigation", status:"Open" });
+    ensureRiskSlNo(); riskData.unshift({ slno: nextRiskSlNo(), initiative:"", risk:"", raisedDate:"", closedDate:"", impact:1, probability:1, riskLevel:"Low", mitigation:"", owner:"", action:"Mitigation", status:"Open" });
     saveWorkingCopy('risk', riskData);
     renderAll();
   });
@@ -3271,7 +3283,7 @@ function wireRiskToolbar(){
     }
   });
   document.getElementById('riskExportBtn').addEventListener('click', ()=>{
-    const rows = riskData.map(r=>[r.initiative,r.risk,r.raisedDate,r.closedDate,r.impact,r.probability,r.impact*r.probability,r.riskLevel,r.mitigation,r.owner,r.action,r.status]);
+    ensureRiskSlNo(); const rows = riskData.map(r=>[r.slno,r.initiative,r.risk,r.raisedDate,r.closedDate,r.impact,r.probability,r.impact*r.probability,r.riskLevel,r.mitigation,r.owner,r.action,r.status]);
     downloadCSV('raid-risk-log.csv', RISK_CSV_HEADER, rows);
   });
   document.getElementById('riskImportInput').addEventListener('change', async e=>{
@@ -3279,12 +3291,12 @@ function wireRiskToolbar(){
     try{
       const text = await readFileAsText(file);
       const rows = parseCSV(text);
-      const imported = mapCsvRows(rows, RISK_COLUMN_MAP, ()=>({ initiative:"", risk:"", raisedDate:"", closedDate:"", impact:1, probability:1, riskLevel:"", mitigation:"", owner:"", action:"", status:"" }))
-        .map(r=>({ ...r, raisedDate:normalizeDate(r.raisedDate), closedDate:normalizeDate(r.closedDate), impact: toNumberOrNull(r.impact) ?? 1, probability: toNumberOrNull(r.probability) ?? 1 }))
+      const imported = mapCsvRows(rows, RISK_COLUMN_MAP, ()=>({ slno:null, initiative:"", risk:"", raisedDate:"", closedDate:"", impact:1, probability:1, riskLevel:"", mitigation:"", owner:"", action:"", status:"" }))
+        .map(r=>({ ...r, slno: toNumberOrNull(r.slno), raisedDate:normalizeDate(r.raisedDate), closedDate:normalizeDate(r.closedDate), impact: toNumberOrNull(r.impact) ?? 1, probability: toNumberOrNull(r.probability) ?? 1 }))
         .filter(r=>r.initiative || r.risk);
       if(imported.length===0){ alert("No rows were recognized in that CSV. Check that it has an \"Initiative\" or \"Risk\" column."); return; }
       if(confirm(`Import ${imported.length} row(s) and replace the current RAID Log data?`)){
-        riskData = imported;
+        riskData = imported; ensureRiskSlNo();
         saveWorkingCopy('risk', riskData);
         renderAll();
       }
@@ -3359,7 +3371,7 @@ function renderActionTable(){
     .filter(x=> actionFilter==="All" || x.a.status===actionFilter)
     .sort((a,b)=> (b.a.no||0) - (a.a.no||0));
 
-  indexed.forEach(({a,i})=>{
+  applyUserSort('action', indexed, o=>o.a).forEach(({a,i})=>{
     const overdue = isOverdue(a.due, a.status);
     const tr = document.createElement('tr');
     if(editMode.action){
@@ -3491,7 +3503,7 @@ function renderAssumptionTable(){
     body.innerHTML = `<tr><td colspan="5"><div class="empty-note">No assumptions logged yet. Use "+ Add row" or "Import CSV" above to add some.</div></td></tr>`;
     return;
   }
-  assumptionData.forEach((a,i)=>{
+  applyUserSort('assumption', assumptionData.map((a,i)=>({a,i})), o=>o.a).forEach(({a,i})=>{
     const tr = document.createElement('tr');
     if(editMode.assumption){
       tr.innerHTML = `
@@ -3596,7 +3608,7 @@ function renderIssueTable(){
     body.innerHTML = `<tr><td colspan="7"><div class="empty-note">No issues logged yet. Use "+ Add row" or "Import CSV" above to add some.</div></td></tr>`;
     return;
   }
-  indexed.forEach(({x,i})=>{
+  applyUserSort('issue', indexed, o=>o.x).forEach(({x,i})=>{
     const tr = document.createElement('tr');
     if(editMode.issue){
       tr.innerHTML = `
@@ -3711,7 +3723,7 @@ function renderDependencyTable(){
     body.innerHTML = `<tr><td colspan="7"><div class="empty-note">No dependencies logged yet. Use "+ Add row" or "Import CSV" above to add some.</div></td></tr>`;
     return;
   }
-  indexed.forEach(({x,i})=>{
+  applyUserSort('dependency', indexed, o=>o.x).forEach(({x,i})=>{
     const tr = document.createElement('tr');
     if(editMode.dependency){
       tr.innerHTML = `
@@ -3913,7 +3925,7 @@ function renderKpiMetricTable(){
     body.innerHTML = `<tr><td colspan="6"><div class="empty-note">No KPI metrics yet. Use "+ Add row" or "Import CSV" above to add one.</div></td></tr>`;
     return;
   }
-  kpiMetricData.forEach((m,i)=>{
+  applyUserSort('kpi', kpiMetricData.map((m,i)=>({m,i})), o=>o.m).forEach(({m,i})=>{
     const tr = document.createElement('tr');
     if(editModeKpi){
       tr.innerHTML = `
@@ -4376,7 +4388,7 @@ function syncKpiFromWeekly(){
 }
 function renderWeeklyKpiTable(){
   const body = document.getElementById('weeklyBody'); if(!body) return;
-  const rows = wkFiltered().reverse(); body.innerHTML = "";  // latest week first
+  const rows = applyUserSort('weekly', wkFiltered().reverse(), o=>o.r); body.innerHTML = "";  // latest week first
   const hint = document.getElementById('wkFilterHint');
   if(hint){
     const half = (!!wkFilter.fromWeek !== !!wkFilter.fromYear) || (!!wkFilter.toWeek !== !!wkFilter.toYear);
@@ -4495,36 +4507,114 @@ function isRiskClosed(r){ return /closed/i.test(String(r.status||"")) || !!rcPar
 function rcMonday(d){ const t = new Date(d); const k = (t.getUTCDay()+6)%7; t.setUTCDate(t.getUTCDate()-k); return t; }
 function rcFmt(d, monthly){ const m = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getUTCMonth()]; return monthly ? m+" "+String(d.getUTCFullYear()).slice(2) : d.getUTCDate()+" "+m; }
 function rcEmpty(msg){ return `<div class="empty-note">${msg}</div>`; }
-function rcLineChart(labels, series){
-  const W=560,H=230,L=34,R=12,T=14,B=34, n=labels.length;
-  const max = Math.max(1, ...series.flatMap(s=>s.vals)); const step = max<=5?1:Math.ceil(max/5);
-  const top = Math.ceil(max/step)*step;
-  const x = i => L + (n===1 ? (W-L-R)/2 : i*(W-L-R)/(n-1)), y = v => T + (H-T-B)*(1-v/top);
-  let g=""; for(let v=0; v<=top; v+=step){ g += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="#DFE5EC"/><text x="${L-6}" y="${y(v)+4}" text-anchor="end" font-size="10" fill="#7C8AA0">${v}</text>`; }
-  const every = Math.ceil(n/8);
-  labels.forEach((lb,i)=>{ if(i%every===0) g += `<text x="${x(i)}" y="${H-12}" text-anchor="middle" font-size="10" fill="#7C8AA0">${escHtml(lb)}</text>`; });
-  series.forEach(se=>{
-    g += `<polyline fill="none" stroke="${se.color}" stroke-width="2.4" points="${se.vals.map((v,i)=>x(i)+","+y(v)).join(" ")}"/>`;
-    se.vals.forEach((v,i)=>{ g += `<circle cx="${x(i)}" cy="${y(v)}" r="3.4" fill="${se.color}"><title>${escHtml(labels[i])} · ${se.name}: ${v}</title></circle>`; });
+
+function ensureRiskSlNo(){
+  // Sl.no. is a stable running number. Rows without one (older data) are numbered
+  // oldest -> newest, i.e. from the bottom of the list upwards.
+  let max = 0; riskData.forEach(r=>{ const n = Number(r.slno); if(n>max) max = n; });
+  for(let k=riskData.length-1; k>=0; k--){ const n = Number(riskData[k].slno); if(!(n>0)){ riskData[k].slno = ++max; } else riskData[k].slno = n; }
+}
+function nextRiskSlNo(){ let m = 0; riskData.forEach(r=>{ const n = Number(r.slno); if(n>m) m = n; }); return m+1; }
+
+/* ---------- Sortable column headers (all tables) ---------- */
+const sortState = {};   // key -> {field, dir}
+const SORT_DATE_FIELDS = new Set(["estimated","committed","actual","raisedDate","closedDate","due","neededBy"]);
+const SORT_LEVEL_RANK = {critical:4, high:3, medium:2, low:1};
+function sortValue(field, row){
+  if(field==="score") return (Number(row.impact)||0)*(Number(row.probability)||0);
+  if(field==="riskLevel"){ const k = String(row.riskLevel||"").trim().toLowerCase(); return SORT_LEVEL_RANK[k] ?? null; }
+  const v = row[field];
+  if(v===null || v===undefined || v==="") return null;
+  if(SORT_DATE_FIELDS.has(field)){ const n = normalizeFilterDate(v); return n || String(v).toLowerCase(); }
+  if(typeof v==="number") return isNaN(v) ? null : v;
+  const str = String(v).trim(); if(str==="") return null;
+  if(/^-?\d+(\.\d+)?$/.test(str)) return Number(str);
+  return str.toLowerCase();
+}
+function applyUserSort(key, list, rowOf){
+  const st = sortState[key]; if(!st) return list;
+  const dir = st.dir==="desc" ? -1 : 1;
+  return list.map((o,n)=>({o,n,v:sortValue(st.field, rowOf(o))})).sort((a,b)=>{
+    const an = a.v===null, bn = b.v===null;
+    if(an || bn) return an&&bn ? a.n-b.n : (an ? 1 : -1);   // blanks always last
+    let c;
+    if(typeof a.v==="number" && typeof b.v==="number") c = a.v-b.v;
+    else c = String(a.v).localeCompare(String(b.v), undefined, {numeric:true, sensitivity:"base"});
+    return c!==0 ? c*dir : a.n-b.n;
+  }).map(x=>x.o);
+}
+const SORT_CFG = [
+  {key:"delivery",   body:"deliveryBody",   render:()=>renderDeliveryTable(),   fields:["initiative","estimated","contingency","committed","actual","status","variance","commitmentStatus","delayCause","track","progressNote",null]},
+  {key:"risk",       body:"riskBody",       render:()=>renderRiskTable(),       fields:["slno","initiative","risk","raisedDate","closedDate","impact","probability","score","riskLevel","mitigation","owner","status",null]},
+  {key:"assumption", body:"assumptionBody", render:()=>renderAssumptionTable(), fields:["initiative","assumption","owner","notes",null]},
+  {key:"issue",      body:"issueBody",      render:()=>renderIssueTable(),      fields:["initiative","issue","impact","owner","status","resolution",null]},
+  {key:"dependency", body:"dependencyBody", render:()=>renderDependencyTable(), fields:["initiative","dependency","dependsOn","owner","neededBy","status",null]},
+  {key:"action",     body:"actionBody",     render:()=>renderActionTable(),     fields:["no","item","to","owner","followUp","due","status",null]},
+  {key:"kpi",        body:"kpiMetricBody",  render:()=>renderKpiMetricTable(),  fields:["metric","current","previous","previousLabel","target",null]},
+  {key:"weekly",     body:"weeklyBody",     render:()=>renderWeeklyKpiTable(),  fields:["year","week","cellPress","clinics","hms","snt","cpc","overall",null]},
+];
+function initSortableHeaders(){
+  SORT_CFG.forEach(cfg=>{
+    const bodyEl = document.getElementById(cfg.body); if(!bodyEl) return;
+    const ths = bodyEl.closest('table').querySelectorAll('thead th');
+    ths.forEach((th,idx)=>{
+      const field = cfg.fields[idx]; if(!field) return;
+      th.classList.add('sortable'); th.tabIndex = 0; th.setAttribute('role','button'); th.title = "Click to sort";
+      const go = ()=>{
+        const st = sortState[cfg.key];
+        if(!st || st.field!==field) sortState[cfg.key] = {field, dir:"asc"};
+        else if(st.dir==="asc") st.dir = "desc";
+        else delete sortState[cfg.key];                    // third click = back to default order
+        ths.forEach((t,k)=>{ const s2 = sortState[cfg.key]; const on = s2 && cfg.fields[k]===s2.field;
+          if(on){ t.dataset.dir = s2.dir; t.setAttribute('aria-sort', s2.dir==="asc"?"ascending":"descending"); } else { delete t.dataset.dir; t.removeAttribute('aria-sort'); } });
+        try{ cfg.render(); }catch(err){ console.error('Sort re-render failed', cfg.key, err); }
+      };
+      th.addEventListener('click', go);
+      th.addEventListener('keydown', e=>{ if(e.key==="Enter" || e.key===" "){ e.preventDefault(); go(); } });
+    });
   });
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Risks raised versus closed">${g}</svg>`+
+}
+
+/* ---------- Risk charts: raised vs closed (weekly bars) + aging of open risks ---------- */
+function rcBarsGrouped(labels, series){
+  const n = labels.length, gw = 54, L = 34, R = 12, T = 22, B = 36, H = 240;
+  const W = Math.max(560, L+R+n*gw);
+  const max = Math.max(1, ...series.flatMap(s=>s.vals)); const step = max<=5?1:Math.ceil(max/5); const top = Math.ceil(max/step)*step;
+  const y = v => T + (H-T-B)*(1-v/top);
+  let g=""; for(let v=0; v<=top; v+=step){ g += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="#DFE5EC"/><text x="${L-6}" y="${y(v)+4}" text-anchor="end" font-size="10" fill="#7C8AA0">${v}</text>`; }
+  const k = series.length, bw = (gw-14)/k;
+  labels.forEach((lb,i)=>{
+    const gx = L + i*gw + 7;
+    series.forEach((se,j)=>{
+      const v = se.vals[i], bx = gx + j*bw, by = y(v);
+      g += `<rect x="${bx}" y="${by}" width="${bw-2}" height="${Math.max(0,H-B-by)}" rx="2" fill="${se.color}"><title>${escHtml(lb)} · ${se.name}: ${v}</title></rect>`;
+      if(v>0) g += `<text x="${bx+(bw-2)/2}" y="${by-4}" text-anchor="middle" font-size="11" font-weight="700" fill="#182333">${v}</text>`;
+    });
+    g += `<text x="${L+i*gw+gw/2}" y="${H-16}" text-anchor="middle" font-size="10" fill="#7C8AA0">${escHtml(lb)}</text>`;
+  });
+  return `<div class="rc-scroll"><svg viewBox="0 0 ${W} ${H}" width="${W}" style="min-width:100%;max-width:none;" role="img" aria-label="Risks raised versus closed per week">${g}</svg></div>`+
     `<div class="rc-legend">${series.map(se=>`<span><i style="background:${se.color}"></i>${se.name} (${se.vals.reduce((a,b)=>a+b,0)})</span>`).join("")}</div>`;
 }
-function rcBarChart(labels, vals, colors){
-  const W=560,H=230,L=34,R=12,T=18,B=34, n=labels.length;
-  const max = Math.max(1, ...vals); const step = max<=5?1:Math.ceil(max/5); const top = Math.ceil(max/step)*step;
-  const bw = (W-L-R)/n, y = v => T + (H-T-B)*(1-v/top);
-  let g=""; for(let v=0; v<=top; v+=step){ g += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="#DFE5EC"/><text x="${L-6}" y="${y(v)+4}" text-anchor="end" font-size="10" fill="#7C8AA0">${v}</text>`; }
-  labels.forEach((lb,i)=>{
-    const bx = L+i*bw+bw*0.18, w = bw*0.64, by = y(vals[i]);
-    g += `<rect x="${bx}" y="${by}" width="${w}" height="${Math.max(0,H-B-by)}" rx="3" fill="${colors[i]}"><title>${lb}: ${vals[i]} open</title></rect>`;
-    g += `<text x="${bx+w/2}" y="${by-5}" text-anchor="middle" font-size="11" font-weight="700" fill="#182333">${vals[i]}</text>`;
-    g += `<text x="${bx+w/2}" y="${H-12}" text-anchor="middle" font-size="10" fill="#7C8AA0">${lb}</text>`;
+function rcAgingBars(items){
+  // items: [{label, days}] oldest first. Horizontal bars: one per open risk, length = days open.
+  const rowH = 28, L = 190, R = 46, T = 8, W = 560, H = T + items.length*rowH + 24;
+  const maxD = Math.max(1, ...items.map(x=>x.days));
+  const step = maxD<=10?1 : maxD<=30?5 : maxD<=100?10 : 30; const topD = Math.ceil(maxD/step)*step;
+  const x = d => L + (W-L-R)*(d/topD);
+  const col = d => d<=7 ? "#189E86" : d<=14 ? "#7CBF8E" : d<=30 ? "#D99A2B" : d<=60 ? "#E07A4A" : "#D1554A";
+  let g="";
+  for(let d=0; d<=topD; d+=step){ g += `<line x1="${x(d)}" x2="${x(d)}" y1="${T}" y2="${H-24}" stroke="#DFE5EC"/><text x="${x(d)}" y="${H-8}" text-anchor="middle" font-size="10" fill="#7C8AA0">${d}d</text>`; }
+  items.forEach((it,i)=>{
+    const yy = T + i*rowH, lab = it.label.length>30 ? it.label.slice(0,29)+"…" : it.label;
+    g += `<text x="${L-8}" y="${yy+rowH/2+4}" text-anchor="end" font-size="11" fill="#182333"><title>${escHtml(it.label)}</title>${escHtml(lab)}</text>`;
+    g += `<rect x="${L}" y="${yy+5}" width="${Math.max(2,x(it.days)-L)}" height="${rowH-10}" rx="3" fill="${col(it.days)}"><title>${escHtml(it.label)}: open ${it.days} day(s)</title></rect>`;
+    g += `<text x="${x(it.days)+5}" y="${yy+rowH/2+4}" font-size="11" font-weight="700" fill="#182333">${it.days}d</text>`;
   });
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Open risk aging">${g}</svg>`;
+  return `<div class="rc-scroll"><svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Days open per open risk">${g}</svg></div>`;
 }
 function renderRiskCharts(){
   const tEl = document.getElementById('riskTrendChart'), aEl = document.getElementById('riskAgingChart'); if(!tEl || !aEl) return;
+  ensureRiskSlNo();
   const lvl = riskData.filter(r=> riskFilter==="All" || r.riskLevel===riskFilter);
   const f = dateFilterState.risk.from, t = dateFilterState.risk.to;
   const lo = (f && f!=="__invalid__") ? rcParse(f) : null, hi = (t && t!=="__invalid__") ? rcParse(t) : null;
@@ -4536,33 +4626,32 @@ function renderRiskCharts(){
   if(!all.length){ tEl.innerHTML = rcEmpty("No raised/closed dates in this period. Fill in Raised Date and Closed Date in the table below."); sub.textContent = ""; }
   else {
     const minD = lo || new Date(Math.min(...all)), maxD = hi || new Date(Math.max(...all));
-    const monthly = (maxD-minD)/86400000 > 120;
-    const keyOf = d => monthly ? d.getUTCFullYear()*100+d.getUTCMonth() : rcMonday(d).getTime();
-    const buckets = [];
-    if(monthly){ let c = new Date(Date.UTC(minD.getUTCFullYear(), minD.getUTCMonth(), 1)); while(c<=maxD){ buckets.push(new Date(c)); c = new Date(Date.UTC(c.getUTCFullYear(), c.getUTCMonth()+1, 1)); } }
-    else { let c = rcMonday(minD); while(c<=maxD){ buckets.push(new Date(c)); c = new Date(c.getTime()+7*86400000); } }
-    const idx = new Map(buckets.map((b,i)=>[keyOf(b),i]));
+    const buckets = []; let c = rcMonday(minD); while(c<=maxD){ buckets.push(new Date(c)); c = new Date(c.getTime()+7*86400000); }
+    const idx = new Map(buckets.map((b,i)=>[b.getTime(),i]));
     const rv = buckets.map(()=>0), cv = buckets.map(()=>0);
-    raised.forEach(d=>{ const i = idx.get(keyOf(d)); if(i!==undefined) rv[i]++; });
-    closed.forEach(d=>{ const i = idx.get(keyOf(d)); if(i!==undefined) cv[i]++; });
-    sub.textContent = `${monthly?"Monthly":"Weekly"} · ${(lo||minD).toISOString().slice(0,10)} to ${(hi||maxD).toISOString().slice(0,10)}` + (riskFilter!=="All" ? ` · ${riskFilter} risks` : "");
-    tEl.innerHTML = rcLineChart(buckets.map(b=>rcFmt(b,monthly)), [{name:"Raised", color:"#D1554A", vals:rv},{name:"Closed", color:"#189E86", vals:cv}]);
+    raised.forEach(d=>{ const i = idx.get(rcMonday(d).getTime()); if(i!==undefined) rv[i]++; });
+    closed.forEach(d=>{ const i = idx.get(rcMonday(d).getTime()); if(i!==undefined) cv[i]++; });
+    sub.textContent = `Weekly (week starting Monday) · ${(lo||minD).toISOString().slice(0,10)} to ${(hi||maxD).toISOString().slice(0,10)}` + (riskFilter!=="All" ? ` · ${riskFilter} risks` : "");
+    tEl.innerHTML = rcBarsGrouped(buckets.map(b=>rcFmt(b,false)), [{name:"Raised", color:"#D1554A", vals:rv},{name:"Closed", color:"#189E86", vals:cv}]);
   }
-  // Aging of open risks (days since raised, as of today)
+  // Aging: every open risk raised in the selected period, days open as of today.
   const today = new Date(Date.UTC(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate()));
-  const open = lvl.filter(r=>!isRiskClosed(r)).map(r=>({r, d:rcParse(r.raisedDate)}));
-  const dated = open.filter(x=>x.d && riskRaisedMatches(x.r));
-  const ages = dated.map(x=>Math.max(0, Math.round((today-x.d)/86400000)));
+  const open = lvl.filter(r=>!isRiskClosed(r));
+  const undated = open.filter(r=>!rcParse(r.raisedDate)).length;
+  const items = open.filter(r=>rcParse(r.raisedDate) && riskRaisedMatches(r))
+    .map(r=>({label:`#${r.slno} ${r.initiative||r.risk||'Risk'}`, days:Math.max(0, Math.round((today-rcParse(r.raisedDate))/86400000))}))
+    .sort((a,b)=>b.days-a.days);
   const asub = document.getElementById('riskAgingSub');
-  if(!ages.length){ aEl.innerHTML = rcEmpty("No open risks with a Raised Date in this period."); asub.textContent = ""; }
-  else {
-    const edges = [[0,7,"0-7d"],[8,14,"8-14d"],[15,30,"15-30d"],[31,60,"31-60d"],[61,1e9,"60d+"]];
-    const vals = edges.map(([a,b])=>ages.filter(x=>x>=a&&x<=b).length);
-    const cols = ["#189E86","#7CBF8E","#D99A2B","#E07A4A","#D1554A"];
-    const durs = lvl.filter(isRiskClosed).map(r=>{ const a=rcParse(r.raisedDate), c=rcParse(r.closedDate); return (a&&c&&riskRaisedMatches(r)) ? Math.round((c-a)/86400000) : null; }).filter(x=>x!==null);
-    const avg = a => Math.round(a.reduce((x,y)=>x+y,0)/a.length);
-    asub.textContent = `${ages.length} open · avg age ${avg(ages)}d · oldest ${Math.max(...ages)}d` + (durs.length ? ` · avg time to close ${avg(durs)}d` : "");
-    aEl.innerHTML = rcBarChart(edges.map(e=>e[2]), vals, cols);
+  if(!items.length){
+    aEl.innerHTML = rcEmpty(open.length ? "No open risks with a Raised Date in this period." : "No open risks — nothing to age.");
+    asub.textContent = undated ? `${undated} open risk(s) have no Raised Date, so they cannot be aged.` : "";
+  } else {
+    const ds = items.map(x=>x.days), avg = Math.round(ds.reduce((a,b)=>a+b,0)/ds.length);
+    const bands = [["0-7d",0,7,"#189E86"],["8-14d",8,14,"#7CBF8E"],["15-30d",15,30,"#D99A2B"],["31-60d",31,60,"#E07A4A"],["60d+",61,1e9,"#D1554A"]];
+    asub.textContent = `${items.length} open · avg ${avg}d · oldest ${Math.max(...ds)}d · as of today` + (undated ? ` · ${undated} open without Raised Date not shown` : "");
+    const shown = items.slice(0,15);
+    aEl.innerHTML = rcAgingBars(shown) + (items.length>shown.length ? `<div class="rc-aging-note">Showing the 15 oldest of ${items.length} open risks.</div>` : "") +
+      `<div class="rc-legend">${bands.map(([n,a,b,cl])=>`<span><i style="background:${cl}"></i>${n}: ${ds.filter(x=>x>=a&&x<=b).length}</span>`).join("")}</div>`;
   }
 }
 function refreshLiveWidgets(){
@@ -5023,6 +5112,7 @@ function init(){
   bindDateFilter("overview");
   bindDateFilter("delivery");
   bindDateFilter("risk");
+  initSortableHeaders();
   document.getElementById('deliveryStatusSelect').addEventListener('change', ()=>renderDeliveryTable());
   const now = TODAY.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
   document.getElementById('footerUpdated').textContent = "Dashboard generated " + now;
